@@ -1,0 +1,16 @@
+unexpected_cfgs error:
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("custom-heap"))'] }
+
+
+lint warning : deprecated = "allow"
+
+[lints.rust]
+deprecated = "allow"
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(feature, values("custom-heap"))'] }
+
+
+
+
+Program Id: DAEJ7Rzg6s2LdKQ9fpRPE1uXJn5SVJoUF3LsWsYYykya
+
+Signature: 5gSLTSSRSP4JhbukjdtKiziq5kdEdnnthRXvw3fr3ZFheX4v68c5Smti8h24FBntzMdQ6iacVEEJR2YZS9EYp5od
