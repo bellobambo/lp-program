@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
-declare_id!("7XsphaTcfqrwkRmm7htDsko8tyqdnzmCLrycqpDFvVLe");
+declare_id!("AvTfTNzZfqg666MTy6N4MaeMwdZxa8rBGgdsgkdGoXPK");
 
 #[program]
 pub mod lp_program {
@@ -17,17 +17,27 @@ pub mod lp_program {
         Ok(())
     }
 
+    // Note: start_date and end_date are i64 unix timestamps (seconds)
+    #[allow(clippy::too_many_arguments)]
     pub fn initialize_job_post(
         ctx: Context<InitializeJobPost>,
         title: String,
         description: String,
         amount: u64,
+        start_date: i64,
+        end_date: i64,
     ) -> Result<()> {
         // Only clients can post jobs
         require!(
             ctx.accounts.user_account.role == UserRole::Client,
             ErrorCode::Unauthorized
         );
+
+        // Validation: start_date must be <= end_date, and start_date must not be in the past
+        require!(start_date <= end_date, ErrorCode::InvalidDates);
+
+        let clock = Clock::get()?;
+        require!(start_date >= clock.unix_timestamp, ErrorCode::InvalidDates);
 
         let job_post = &mut ctx.accounts.job_post;
         job_post.client = ctx.accounts.user_account.wallet;
@@ -36,6 +46,8 @@ pub mod lp_program {
         job_post.amount = amount;
         job_post.is_filled = false;
         job_post.escrow_bump = ctx.bumps.escrow;
+        job_post.start_date = start_date;
+        job_post.end_date = end_date;
 
         // Transfer funds to escrow
         let cpi_context = CpiContext::new(
@@ -47,16 +59,29 @@ pub mod lp_program {
         );
         system_program::transfer(cpi_context, amount)?;
 
-        msg!("Job post created with amount: {}", amount);
+        msg!(
+            "Job post created with amount: {} start: {} end: {}",
+            amount,
+            job_post.start_date,
+            job_post.end_date
+        );
         Ok(())
     }
 
-    pub fn apply_to_job(ctx: Context<ApplyToJob>, resume_link: String) -> Result<()> {
+    // Allow freelancer to include expected_end_date when applying
+    pub fn apply_to_job(
+        ctx: Context<ApplyToJob>,
+        resume_link: String,
+        expected_end_date: i64,
+    ) -> Result<()> {
         // Only freelancers can apply
         require!(
             ctx.accounts.user_account.role == UserRole::Freelancer,
             ErrorCode::Unauthorized
         );
+
+        // Validation: freelancer's expected_end_date must be a valid unix timestamp (non-negative)
+        require!(expected_end_date >= 0, ErrorCode::InvalidDates);
 
         let application = &mut ctx.accounts.application;
         application.applicant = ctx.accounts.user_account.wallet;
@@ -67,10 +92,12 @@ pub mod lp_program {
         application.submission_link = String::new();
         application.narration = String::new();
         application.client_review = String::new();
+        application.expected_end_date = expected_end_date;
 
         msg!(
-            "Application submitted with resume: {}",
-            application.resume_link
+            "Application submitted with resume: {} expected_end_date: {}",
+            application.resume_link,
+            application.expected_end_date
         );
         Ok(())
     }
@@ -201,6 +228,9 @@ pub struct JobPost {
     pub description: String,
     pub is_filled: bool,
     pub escrow_bump: u8,
+    // New: start and end dates (unix timestamps, in seconds)
+    pub start_date: i64,
+    pub end_date: i64,
 }
 
 #[account]
@@ -215,9 +245,11 @@ pub struct Application {
     #[max_len(200)]
     pub submission_link: String,
     #[max_len(300)]
-    pub narration: String, // New: freelancer’s narration
+    pub narration: String, // freelancer’s narration
     #[max_len(300)]
-    pub client_review: String, // New: client’s review
+    pub client_review: String, // client’s review
+    // New: freelancer's expected end date for the job (unix timestamp, in seconds)
+    pub expected_end_date: i64,
 }
 
 #[derive(Accounts)]
@@ -236,7 +268,7 @@ pub struct RegisterUser<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(title: String)]
+#[instruction(title: String, start_date: i64, end_date: i64)]
 pub struct InitializeJobPost<'info> {
     #[account(
         init,
@@ -333,4 +365,6 @@ pub enum ErrorCode {
     ApplicationNotApproved,
     #[msg("Work has not been completed yet")]
     WorkNotCompleted,
+    #[msg("Invalid dates provided")]
+    InvalidDates,
 }
